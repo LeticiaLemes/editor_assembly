@@ -25,7 +25,7 @@ Section .data
     FOREGROUND_INTENSITY equ 0x0008
 
     ; mensagens do editor
-    header_top db "========================================"", 13, 16, 0
+    header_top db "========================================", 13, 16, 0
     header_title db "      EDITOR DE TEXTO (64 BITS)     ", 13, 16, 0
     header_bottom db "========================================", 13, 16, 0
 
