@@ -4,7 +4,7 @@
 ; Linkar: link editor.obj -subsystem:windows -o editor.exe
 ; AUTOR: Letícia Pegorini - ra: 2699583
 ; AUTOR: Leonardo Pontes - ra:
-; AUTOR: Luana Pereira - ra:
+; AUTOR: Luana Pereira - ra: 2699605
 
 bits 64
 
@@ -204,34 +204,315 @@ init_editor:
 
 
 ; DELETA CARACTERE - remove um caractere do buffer na posição atual do cursor
+delete_char:
+    push rbp       ; salva o endereço atual da pilha
+    mov rbp, rsp   ; cria novo ponto de referencia
+    push rbx       ; salva o registrador rbx (será usado)
+    push rcx       ; salva o registrador rcx
+    push rsi       ; salva o registrador rsi (fonte)
+    push rdi       ; salva o registrador rdi (destino)
 
+    ; verifica se está no início do buffer (não há caractere para deletar)
+    mov rbx, [buffer_pos]       ; carrega posição atual do cursos em rbx
+    cmp rbx, 0                  ; verifica se está na posição inicial (0)
+    je .fim                     ; se sim, vai para o fim
+
+    ; decrementa posição
+    dec qword [buffer_pos]      ; cursor volta uma posição (-1)
+    dec rbx                     ; atualiza rbx também (-1)
+
+    ; desloca os caracteres para a esquerda (sobrescreve o caractere deletado)
+    mov rsi, rbx                ; fonte = posição do caractere a ser deletado
+    inc rsi                     ; fonte = próximo caractere (posição + 1)
+    mov rdi, rbx                ; destino = posição atual (onde vai sobrescrever)
+
+.desloca_loop:
+    cmp rsi, [buffer_len]         ; verifica se chegou ao fim do buffer
+    jge .atualiza               ; se sim, vai atualizar as variáveis
+
+    mov al, [text_buffer + rsi]   ; carrega caractere da posição fonte
+    mov [text_buffer + rdi], al   ; sobrescreve na posição destino (deslocando para a esquerda)
+    inc rsi                       ; avança para o próximo caractere (+1)
+    inc rdi                       ; avança para o próximo destino (+1)
+    jmp .desloca_loop             ; repete até o fim do buffer
+
+.atualiza:
+    ;atualiza tamanho
+    dec qword [buffer_len]      ; decrementa tamanho total do buffer
+
+    ; atualiza posição do cursor
+    cmp dword [cursor_x], 0     ; verifica coluna atual do cursor
+    jg .decrementa              ; se for maior que 0, decrementa
+.decrementa:
+    dec dword [cursor_x]        ; move o cursos uma coluna para a esquerda
+    mov byte [modified], 1      ; marca que o texto foi modificado (para salvar)
+
+.fim:
+    pop rdi       ; restaura o registrador rdi
+    pop rsi       ; restaura o registrador rsi
+    pop rcx       ; restaura o registrador rcx
+    pop rbx       ; restaura o registrador rbx
+    pop rbp       ; restaura o endereço da pilha
+    ret           ; retorna da função
 
 ; MOVE CURSOR ESQUERDA
+move_cursor_left:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
 
+    mov rbx, [buffer_pos]   ; carrega posição atual do cursor
+    cmp rbx, 0              ; verifica se está na posição inicial (0)
+    je .fim                 ; se sim, vai para o fim (não move)
+
+    dec qword [buffer_pos]      ; decrementa posição no buffer
+
+    cmp dword [cursor_x], 0     ; verifica coluna atual
+    jg .decrementa              ; se for maior que 0, decrementa
+
+.decrementa:
+    dec dword [cursor_x]        ; move o cursor uma coluna para a esquerda  
+
+.fim:
+    pop rbp            ; restaura o endereço da pilha   
+    ret                ; retorna da função
 
 ; MOVE CURSOR DIREITA
+move_cursor_right:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
 
+    mov rbx, [buffer_pos]       ; carrega posição atual do cursor
+    cmp rbx, [buffer_len]       ; compara com tamanho total do buffer
+    jge .fim                    ; se estiver no fim, não move
+
+    inc qword [buffer_pos]      ; incrementa posição no buffer
+    inc dword [cursor_x]        ; move o cursor uma coluna para a direita
+
+.fim:
+    pop rbp            ; restaura o endereço da pilha   
+    ret                ; retorna da função
 
 ; MOVE CURSOR CIMA
+move_cursor_up:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
 
+    cmp dword [cursor_y], 2     ; verifica se está na linha 2
+    jle .fim                    ; se for <=2, não move
+
+    dec dword [cursor_y]        ; move o cursor uma linha para cima
+
+.fim:
+    pop rbp            ; restaura o endereço da pilha   
+    ret                ; retorna da função
 
 ; MOVE CURSOR BAIXO
+move_cursor_down:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
 
+    inc dword [cursor_y]        ; move o cursor uma linha para baixo
+
+.fim:
+    pop rbp            ; restaura o endereço da pilha   
+    ret                ; retorna da função
 
 ; SALVA ARQUIVO - salva o conteúdo do buffer em um arquivo de texto
+save_to_file:
+    push rbp           ; salva o endereço atual da pilha
+    mov rbp, rsp       ; cria novo ponto de referência
+    sub rsp, 64        ; reserva 64 bytes na pilha para variáeis locais
 
+    ; CreateFileA: cria/abre arquivo
+    ; Parâmetros (ordem na pilha e registradores):
+    ; rcx = lpFileName
+    ; rdx = dwDesiredAccess (GENERIC_WRITE = 0x40000000)
+    ; r8  = dwShareMode (0 - compartilhamento exclusivo)
+    ; r9  = lpSecurityAttributes (NULL - sem atributos de segurança)
+    ; pilha: dwCreationDisposition (CREATE_ALWAYS = 2 - cria novo/sempre)
+    ; pilha: dwFlagsAndAttributes (FILE_ATTRIBUTE_NORMAL = 0x80)
+    ; pilha: hTemplateFile (NULL - sem template)
+
+    lea rcx, [filename_base]      ; carrega nome do arquivo
+    mov rdx, 0x40000000           ; permissão de escrita
+    xor r8, r8                    ; compartilhamento exclusivo
+    xor r9, r9                    ; sem atributos de segurança
+    push 0                        ; hTemplateFile (NULL)
+    push 0x80                     ; FILE_ATTRIBUTE_NORMAL (arquivo normal)
+    push 2                        ; CREATE_ALWAYS (cria sempre, sobrescreve)
+
+    sub rsp, 32                    ; ajusta pilha para chamada de API
+    call CreateFileA               ; chama API para criar/abrir arquivo
+    add rsp, 32                    ; restaura pilha após chamada
+    add rsp, 24                    ; limpa os 3 parâmetros empilhados (3*8=24)
+
+    ; verifica se abriu corretamente
+    cmp rax, -1                    ; compara retorno com -1 (INVALID_HANDLE_VALUE)
+    je .erro                       ; se sim, erro ao abrir arquivo
+
+    mov [file_handle], rax             ; salva handle do arquivo aberto
+
+    ; WriteFile: escreve buffer no arquivo
+    ; rcx = hFile (handle do arquivo)
+    ; rdx = lpBuffer (endereço dos dados)
+    ; r8  = nNumberOfBytesToWrite (quantos bytes escrever)
+    ; r9  = lpNumberOfBytesWritten (onde armazenar quantos foram escritos)
+    ; pilha: lpOverlapped (NULL - operação síncrona)
+
+    mov rcx, [file_handle]           ; carrega handle do arquivo
+    lea rdx, [text_buffer]           ; carrega endereço do buffer de texto
+    mov r8, [buffer_len]             ; carrega tamanho do buffer
+    lea r9, [bytes_written]          ; carrega endereço para armazenar quantidade de bytes escritos
+    push 0                           ; lpOverlapped (NULL)
+
+    sub rsp, 32                       ; ajusta pilha para chamada de API
+    call WriteFile                    ; chama API para escrever no arquivo
+    add rsp, 32                       ; restaura pilha após chamada
+    pop rcx                           ; limpa parâmetro empilhado (lpOverlapped)
+
+    ; fecha o arquivo
+    mov rcx, [file_handle]           ; carrega handle do arquivo
+    call CloseHandle                 ; chama API para fechar arquivo
+
+    ; mostra mensagem de sucesso
+    lea rcx, [msg_saved]              ; carrega endereço da mensagem de sucesso
+    call print_string_win                 ; chama função para imprimir mensagem
+    jmp .fim                          ; pula para o fim
+
+.erro:
+    lea rcx, [msg_error]              ; carrega endereço da mensagem de erro
+    call print_string_win                 ; chama função para imprimir mensagem
+
+.fim:
+    add rsp, 64        ; libera espaço da pilha
+    pop rbp            ; restaura o endereço da pilha
+    ret                ; retorna da função
 
 ; ATUALIZA TELA - limpa e redesenha o conteúdo do editor
+refresh_display:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
+    sub rsp, 64         ; reserva 64 bytes na pilha para variáeis locais
 
+    ; limpa a tela (mantém cursor no topo)
+    call clear_screen       ; chama função para limpar a tela
+
+    ; mostra o cabeçalho notamente
+    call show_welcome_screen   ; chama função para mostrar cabeçalho e instruções
+
+    ; mostra o conteúdo do buffer (texto digitado)
+    lea rcx, [text_buffer]      ; carrega endereço do buffer de texto
+    call print_string_win       ; chama função para imprimir o buffer
+
+    ; mostra estatíticas do texto (linhas, palavras, caracteres)
+    call show_stats       ; chama função para mostrar estatísticas
+
+    add rsp, 64        ; libera espaço da pilha
+    pop rbp            ; restaura o endereço da pilha
+    ret                ; retorna da função
 
 ; MOSTRA ESTATÍSTICAS - exibe informações sobre o texto (linhas, palavras, caracteres)
+show_stats:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
+    sub rsp, 32         ; reserva 32 bytes na pilha
 
+    ; mostra linha divisória
+    push sep_line      ; coloca endereço da linha divisória na pilha
+    call print_string_win    ; chama função para imprimir linha divisória
+    add rsp, 8               ; limpa a pilha
+
+    ; mostra total de caracteres
+    push stats_total         ; coloca endereço do texto "Total de caracteres: " na pilha
+    call print_string_win    ; chama função para imprimir texto
+    add rsp, 8               ; limpa a pilha"
+
+    ; mostra o número
+    mov rsi, stats_buffer        ; carrega buffer para conversão
+    mov rax, [buffer_len]        ; carrega tamanho atual do texto (número de caracteres)
+    call int_to_string           ; converte número para string
+
+    lea rcx, [stats_buffer]      ; carrega endereço do buffer com o número convertido
+    call print_string_win        ; chama função para imprimir o número
+
+    ; mostra quebra de linha
+    push newline_str             ; coloca endereço da nova linha na pilha
+    call print_string_win        ; chama função para imprimir quebra de linha
+    add rsp, 8                   ; limpa a pilha
+
+    ; mostra linha divisória final
+    push sep_line                ; coloca endereço da linha divisória na pilha 
+    call print_string_win        ; chama função para imprimir linha divisória
+    add rsp, 8                   ; limpa a pilha
+
+    add rsp, 32         ; libera espaço da pilha
+    pop rbp             ; restaura o endereço da pilha   
+    ret                 ; retorna da função
 
 ; CONVERTE TEXTO PARA STRING - formata o conteúdo do buffer para exibição
    ; Entrada: RAX = número, RSI = buffer de saída
+int_to_string:
+    push rbp            ; salva o endereço atual da pilha
+    mov rbp, rsp        ; cria novo ponto de referência
+    push rbx            ; salva o registrador rbx (divisor)
+    push rcx            ; salva o registrador rcx
+    push rdx            ; salva o registrador rdx (resto da divisão)
 
+    mov rbx, 10         ; divisor para conversão decimal
+    mov rcx, rsi        ; endereço do buffer
+    add rcx, 20         ; vai para o fim do buffer (20 caracteres máximo)
+    mov byte [rcx], 0   ; coloca terminador nulo no final da string
+
+.converte:
+    dec rcx             ; volta uma posição no buffer
+    xor rdx, rdx        ; zera rdx para divisão
+    div rbx             ; divide RAX por 10, quociente em RAX, resto em RDX
+    add dl, '0'         ; converte resto para caractere ASCII
+    mov [rcx], dl       ; armazena caractere no buffer
+    test rax, rax       ; verifica se quociente é zero
+    jnz .converte       ; se não for zero, continua convertendo
+
+    ; move string para o início do buffer (ajusta posição)
+    mov rsi, rcx             ; rsi = posição de início da string convertida
+    mov rdi, stats_buffer    ; rdi = início do buffer de estatísticas
+
+.copia:
+    mov al, [rsi]      ; carrega caractere da posição atual (fonte)
+    mov [rdi], al      ; copia para o buffer de estatísticas (destino)
+    inc rsi            ; avança para o próximo caractere
+    inc rdi            ; avança para o próximo destino
+    cmp al, 0          ; verifica se chegou ao terminador nulo
+    jnz .copia         ; se não, continua copiando
+
+    pop rdx            ; restaura rdx
+    pop rcx            ; restaura rcx
+    pop rbx            ; restaura rbx
+    pop rbp            ; restaura o endereço da pilha
+    ret                ; retorna da função
 
 ; LIMPEZA ANTES DE SAIR - fecha handles e mostra mensagem de saída
+cleanup_and_exit:
+    push rbp           ; salva o endereço atual da pilha
+    mov rbp, rsp       ; cria novo ponto de referência
+    sub rsp, 32        ; reserva 32 bytes na pilha
 
+    ; mostra mensagem de saída
+    lea rcx, [msg_quit]              ; carrega endereço da mensagem de saída
+    call print_string_win            ; chama função para imprimir mensagem
+
+    add rsp, 32        ; libera espaço da pilha
+    pop rbp            ; restaura o endereço da pilha
+    ret                ; retorna da função
 
 ; DADOS ADICIONAIS - funções auxiliares para manipulação de strings, contagem, etc
+section .data
+    sep_line        db "----------------------------------------", 13, 10, 0
+    ; linha divisória para separa estatísticas
+    stats_total     db "Total de caracteres ", 0    ; rótulo para estatísticas
+    newline_str     db 13, 10, 0     ; string para quebra de linha
+
+section .bss
+    key_code        resb 1      ; código da tecla pressionada (1 byte)
+    is_ctrl_s       resb 1      ; flag para Ctrl+S(1 byte)
+    file_handle     resq 1      ; handle do arquivo aberto (8 bytes - QWORD)
+    stats_buffer    resb 32     ; buffer para converter números (32 bytes)
