@@ -185,22 +185,193 @@ init_editor:
 ; LIMPA TELA - executa comando cls para limpar console
 
 
-; MOSTRA TELA INICIAL - exibe cabeçalho e instruções do editor
+clear_screen:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 32
 
+    lea rcx, [cls_cmd]
+    call system
+
+    add rsp, 32
+    pop rbp
+    ret
+
+; MOSTRA TELA INICIAL - exibe cabeçalho e instruções do editor
+RCX = endereço da string
+print_string_win:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 64
+
+    mov rsi, rcx
+    xor rdx, rdx
+
+.conta:
+    cmp byte [rsi + rdx], 0
+    je .fim_conta
+    inc rdx
+    jmp .conta
+
+.fim_conta:
+
+    mov rcx, [hStdOut]
+    mov r8, rdx
+    lea r9, [bytes_written]
+
+    push 0
+    sub rsp, 32
+    call WriteConsoleA
+    add rsp, 32
+    pop rax
+
+    add rsp, 64
+    pop rbp
+    ret
 
 ; IMPRIME TEXTO NA TELA - formata e exibe o conteúdo do buffer
    ;Entrada: RCX (& String)
+   show_welcome_screen:
+
+    lea rcx, [header_top]
+    call print_string_win
+
+    lea rcx, [header_title]
+    call print_string_win
+
+    lea rcx, [header_bottom]
+    call print_string_win
+
+    lea rcx, [header_info]
+    call print_string_win
+
+    lea rcx, [header_cmd1]
+    call print_string_win
+
+    lea rcx, [header_cmd2]
+    call print_string_win
+
+    lea rcx, [header_cmd3]
+    call print_string_win
+
+    lea rcx, [header_cmd4]
+    call print_string_win
+
+    lea rcx, [header_line2]
+    call print_string_win
+
+    lea rcx, [header_prompt]
+    call print_string_win
+
+    lea rcx, [header_line3]
+    call print_string_win
+
+    ret
 
 
 ; LÊ TECLA DO USUÁRIO - lê um evento de teclado e armazena na estrutura input_record
    ;Saída: AL = código da tecla lida
+   read_key:
+
+    push rbp
+    mov rbp, rsp
+    sub rsp, 32
+
+    mov rcx, [hStdIn]
+    lea rdx, [input_record]
+    mov r8, 1
+    lea r9, [chars_read]
+
+    sub rsp, 32
+    call ReadConsoleInputA
+    add rsp, 32
+
+    mov al, [input_record + 14]
+
+    add rsp, 32
+    pop rbp
+    ret
 
 
 ; PROCESSA TECLA - interpreta a tecla lida e atualiza buffer/estado do editor
+process_key:
 
+    cmp al, VK_ESCAPE
+    je .sair
+
+    cmp al, VK_BACK
+    je .backspace
+
+    cmp al, VK_LEFT
+    je .esquerda
+
+    cmp al, VK_RIGHT
+    je .direita
+
+    cmp al, VK_UP
+    je .cima
+
+    cmp al, VK_DOWN
+    je .baixo
+
+    cmp al, 32
+    jl .fim
+
+    call insert_char
+    jmp .fim
+
+.backspace:
+    call delete_char
+    jmp .fim
+
+.esquerda:
+    call move_cursor_left
+    jmp .fim
+
+.direita:
+    call move_cursor_right
+    jmp .fim
+
+.cima:
+    call move_cursor_up
+    jmp .fim
+
+.baixo:
+    call move_cursor_down
+    jmp .fim
+
+.sair:
+    mov byte [running], FALSE
+
+.fim:
+    ret
 
 ; INSERE CARACTERE - insere um caractere no buffer na posição atual do cursor
    ; Entrada: AL = caractere a inserir
+   insert_char:
+
+    push rbp
+    mov rbp, rsp
+
+    mov rbx, [buffer_pos]
+
+    cmp rbx, BUFFER_SIZE-1
+    jge .fim
+
+    mov [text_buffer + rbx], al
+
+    inc qword [buffer_pos]
+    inc qword [buffer_len]
+
+    inc dword [cursor_x]
+
+    mov byte [modified], TRUE
+
+.fim:
+    pop rbp
+    ret
+
+
 
 
 ; DELETA CARACTERE - remove um caractere do buffer na posição atual do cursor
